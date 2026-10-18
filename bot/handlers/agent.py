@@ -207,7 +207,7 @@ async def on_agent_sos_request(
         if not reloaded:
             return
 
-        if res.is_victory:
+        if reloaded.status == SessionStatus.SOLVED or getattr(res, "is_victory", False):
             await callback.answer("🎉 ПОБЕДА! Все символы дешифрованы!", show_alert=True)
             await notifier.notify_victory(reloaded)
             return
@@ -266,7 +266,7 @@ async def on_solo_hint_requested(
     if not reloaded:
         return
 
-    if res.is_victory:
+    if reloaded.status == SessionStatus.SOLVED or getattr(res, "is_victory", False):
         await callback.answer("🎉 ПОБЕДА! Все символы дешифрованы!", show_alert=True)
         await notifier.notify_victory(reloaded)
         return

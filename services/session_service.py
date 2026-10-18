@@ -155,6 +155,16 @@ class SessionHintResult:
     def letter(self) -> Optional[str]:
         return self.hint_log.letter
 
+    @property
+    def is_victory(self) -> bool:
+        """True if the hint led to game completion."""
+        return self.game.status == SessionStatus.SOLVED
+
+    @property
+    def is_solved(self) -> bool:
+        """Alias for is_victory."""
+        return self.game.status == SessionStatus.SOLVED
+
     def __iter__(self):
         yield self.game
         yield self.hint_log

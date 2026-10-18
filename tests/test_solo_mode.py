@@ -199,3 +199,64 @@ class TestSoloUiHandlers:
         assert any("solo_hint" in a for a in actions), "Expected solo_hint button"
         assert any("solo_freq" in a for a in actions), "Expected solo_freq button"
         assert any("solo_surrender" in a for a in actions), "Expected solo_surrender button"
+
+    @pytest.mark.asyncio
+    async def test_full_solo_game_flow_with_all_buttons(self, solo_service: SessionService):
+        """Simulate real user clicking every single button in solo mode."""
+        mock_session = MockTelegramSession()
+        bot = Bot(token="42:MOCK_TOKEN", session=mock_session)
+        dp = create_dispatcher(
+            session_service=solo_service,
+            lock_manager=solo_service.lock_manager,
+            bot_username="SpyAnalystBot",
+            storage=MemoryStorage(),
+        )
+
+        player = MockPlayerClient(dp, bot, user_id=1302123809, username="vvvet1", first_name="ε")
+
+        # 1. Start command
+        await player.send_command("/start")
+        start_msg = mock_session.get_last_message_for_chat(1302123809)
+        assert start_msg is not None
+
+        # 2. Click "🎯 Одиночная игра"
+        await player.click_button_by_text("одиночная", start_msg)
+        diff_msg = mock_session.get_last_message_for_chat(1302123809)
+        assert "ОДИНОЧНЫЙ РЕЖИМ" in diff_msg.text
+
+        # 3. Choose difficulty: EASY
+        await player.click_button_by_text("легкая", diff_msg)
+        term_msg = mock_session.get_last_message_for_chat(1302123809)
+        assert "ПОЛЕВОЙ ТЕРМИНАЛ" in term_msg.text
+
+        # 4. Click "📊 Частотный анализ"
+        await player.click_button_by_text("частотный", term_msg)
+        freq_msg = mock_session.get_last_message_for_chat(1302123809)
+        assert "ЧАСТОТНАЯ РАДИОГРАММА" in freq_msg.text
+
+        # 5. Click "💡 Подсказка Штаба (открыть букву)"
+        await player.click_button_by_text("подсказка", term_msg)
+        hint_term_msg = mock_session.messages[term_msg.message_id]
+        assert "Штаб раскрыл символ" in hint_term_msg.text
+
+        # 6. Click "🔄 Обновить табло"
+        await player.click_button_by_text("обновить", hint_term_msg)
+        refreshed_msg = mock_session.messages[term_msg.message_id]
+
+        # 7. Click a symbol [X]
+        sym_btns = [b for row in refreshed_msg.reply_markup.inline_keyboard for b in row if b.text.startswith("[")]
+        if sym_btns:
+            await player.click_button(sym_btns[0].callback_data, message=refreshed_msg)
+            alpha_msg = mock_session.messages[term_msg.message_id]
+            assert "Выберите предполагаемую букву" in alpha_msg.text
+
+            # 8. Click Back to symbols
+            await player.click_button_by_text("назад", alpha_msg)
+            back_msg = mock_session.messages[term_msg.message_id]
+            assert "ПОЛЕВОЙ ТЕРМИНАЛ" in back_msg.text
+
+            # 9. Click "🏳️ Сдаться"
+            await player.click_button_by_text("сдаться", back_msg)
+            surrender_msg = mock_session.messages[term_msg.message_id]
+            assert "КАПИТУЛЯЦИЯ" in surrender_msg.text
+

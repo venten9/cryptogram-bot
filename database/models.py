@@ -307,5 +307,10 @@ class HintLog(Base):
     session: Mapped["GameSession"] = relationship("GameSession", back_populates="hints", lazy="selectin")
     sender: Mapped["User"] = relationship("User", foreign_keys=[sender_id], back_populates="hints_sent", lazy="selectin")
 
+    @property
+    def is_victory(self) -> bool:
+        """Compatibility property for victory checks."""
+        return False
+
     def __repr__(self) -> str:
         return f"<HintLog id={self.id} type={self.hint_type} session={self.session_id}>"
