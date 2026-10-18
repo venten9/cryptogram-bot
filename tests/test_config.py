@@ -20,7 +20,7 @@ class TestSettings:
         monkeypatch.delenv("bot_username", raising=False)
         monkeypatch.delenv("debug", raising=False)
 
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.BOT_TOKEN == ""
         assert settings.DB_PATH == "sqlite+aiosqlite:///cryptogram.db"
         assert settings.DEBUG is False

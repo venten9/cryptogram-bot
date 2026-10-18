@@ -35,6 +35,10 @@ def build_main_menu_keyboard() -> InlineKeyboardMarkup:
         callback_data=MenuCallback(action="custom"),
     )
     builder.button(
+        text="🎖 Мое досье / Профиль",
+        callback_data=MenuCallback(action="profile"),
+    )
+    builder.button(
         text="ℹ️ Правила игры",
         callback_data=MenuCallback(action="help"),
     )
@@ -293,6 +297,21 @@ def build_cancel_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def build_profile_keyboard() -> InlineKeyboardMarkup:
+    """Build navigation keyboard for player military dossier profile."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔄 Обновить данные",
+        callback_data=MenuCallback(action="profile"),
+    )
+    builder.button(
+        text="◀️ Главное меню",
+        callback_data=MenuCallback(action="main"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 # Aliases for cross-report compatibility
 get_main_menu_keyboard = build_main_menu_keyboard
 get_catalog_keyboard = build_catalog_keyboard
@@ -303,3 +322,5 @@ build_alphabet_keyboard = build_agent_alphabet_keyboard
 get_alphabet_picker_keyboard = build_agent_alphabet_keyboard
 build_play_again_keyboard = build_victory_keyboard
 get_victory_keyboard = build_victory_keyboard
+get_profile_keyboard = build_profile_keyboard
+

@@ -106,10 +106,37 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
 create_sessionmaker = create_session_factory
 
 
+def _migrate_sqlite_schema(sync_conn) -> None:
+    """Safely apply idempotent column migrations for pre-existing SQLite databases."""
+    if sync_conn.dialect.name != "sqlite":
+        return
+
+    result = sync_conn.exec_driver_sql("PRAGMA table_info(users);")
+    rows = result.fetchall()
+    if not rows:
+        return
+
+    existing_cols = {row[1] for row in rows}
+
+    columns_to_add = [
+        ("exp", "INTEGER NOT NULL DEFAULT 0"),
+        ("games_as_analyst", "INTEGER NOT NULL DEFAULT 0"),
+        ("games_as_agent", "INTEGER NOT NULL DEFAULT 0"),
+        ("total_hints_used", "INTEGER NOT NULL DEFAULT 0"),
+        ("total_mistakes", "INTEGER NOT NULL DEFAULT 0"),
+    ]
+
+    for col_name, col_def in columns_to_add:
+        if col_name not in existing_cols:
+            sync_conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN {col_name} {col_def};")
+            logger.info("Migrated users table: added column %s", col_name)
+
+
 async def init_db(engine: AsyncEngine) -> None:
     """Idempotently initialize all database tables from SQLAlchemy metadata."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate_sqlite_schema)
     logger.info("Database tables initialized successfully.")
 
 

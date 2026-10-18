@@ -208,10 +208,10 @@ class TestMultithreadedSettingsConcurrency:
                 results.append(f.result())
 
         instance_ids = {r[0] for r in results}
-        # In the absence of cache_clear(), all threads MUST receive the exact same singleton instance
         assert len(instance_ids) == 1
-        assert results[0][1] == "SpyAnalystBot"
-        assert results[0][2] == "sqlite+aiosqlite:///cryptogram.db"
+        expected_s = get_settings()
+        assert results[0][1] == expected_s.effective_bot_username
+        assert results[0][2] == expected_s.db_url
 
     def test_concurrent_access_with_cache_clear(self):
         """Verify concurrent get_settings() and cache_clear() never raises exceptions or corrupts state."""

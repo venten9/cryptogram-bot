@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 
+from cryptogram.ranks import calculate_rank_progress, get_next_rank, get_rank
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -74,6 +75,11 @@ class User(Base):
     # Player aggregate statistics
     games_played: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     games_won: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    exp: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    games_as_analyst: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    games_as_agent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_hints_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_mistakes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Audit timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -118,6 +124,32 @@ class User(Base):
         if self.games_played <= 0:
             return 0.0
         return round((self.games_won / self.games_played) * 100, 1)
+
+    @property
+    def rank_title(self) -> str:
+        """Russian military rank title based on accumulated EXP."""
+        return get_rank(self.exp if self.exp is not None else 0).name_ru
+
+    @property
+    def current_rank_badge(self) -> str:
+        """Badge emoji or insignia for current military rank."""
+        return get_rank(self.exp if self.exp is not None else 0).badge
+
+    @property
+    def next_rank_exp(self) -> Optional[int]:
+        """EXP threshold for next rank, or None if Marshal."""
+        next_r = get_next_rank(self.exp if self.exp is not None else 0)
+        return next_r.threshold_exp if next_r is not None else None
+
+    @property
+    def rank_progress_pct(self) -> float:
+        """Progress percentage towards next rank (0.0 to 100.0)."""
+        return calculate_rank_progress(self.exp if self.exp is not None else 0)[0]
+
+    @property
+    def rank_progress_bar(self) -> str:
+        """10-segment Unicode progress bar string."""
+        return calculate_rank_progress(self.exp if self.exp is not None else 0)[2]
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r}>"

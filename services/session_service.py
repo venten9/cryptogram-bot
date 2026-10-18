@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from cryptogram.catalog import get_catalog_item
 from cryptogram.engine import (
     calculate_frequencies,
     check_victory,
@@ -17,6 +18,7 @@ from cryptogram.engine import (
     validate_text,
 )
 from cryptogram.models import GuessResult, GuessStatus
+from cryptogram.ranks import ExpBreakdown, calculate_mission_exp
 from database.models import GameSession, HintLog, HintType, SessionStatus, User
 from services.lock_manager import SessionLockManager
 
@@ -444,13 +446,69 @@ class SessionService:
                 game.status = SessionStatus.IN_PROGRESS
 
                 # Record participation
-                game.analyst.games_played += 1
+                if game.analyst is None and game.analyst_id:
+                    game.analyst = await db.get(User, game.analyst_id)
+
+                if game.analyst:
+                    game.analyst.games_played += 1
+                    game.analyst.games_as_analyst += 1
                 agent_user.games_played += 1
+                agent_user.games_as_agent += 1
 
                 await db.commit()
                 await db.refresh(game)
                 self._register_session_cache(game)
                 return game
+
+    async def _process_session_victory(
+        self,
+        game: GameSession,
+        db: AsyncSession,
+    ) -> ExpBreakdown:
+        """Centralized atomic victory processing for game sessions.
+
+        Sets game status to SOLVED, calculates and awards EXP to participants,
+        increments games_won, and accumulates total_hints_used and total_mistakes.
+        """
+        game.status = SessionStatus.SOLVED
+        game.solved_at = datetime.now(timezone.utc)
+
+        # Resolve quote difficulty for EXP engine
+        difficulty = "MEDIUM"
+        is_custom = bool(game.is_custom_quote or not game.catalog_id)
+        if game.catalog_id:
+            catalog_item = get_catalog_item(game.catalog_id)
+            if catalog_item and catalog_item.difficulty:
+                difficulty = catalog_item.difficulty
+
+        exp_breakdown = calculate_mission_exp(
+            difficulty=difficulty,
+            mistakes_count=game.mistakes_count,
+            hints_used=game.hints_used,
+            is_custom=is_custom,
+        )
+
+        # Ensure analyst entity is loaded
+        if game.analyst is None and game.analyst_id:
+            game.analyst = await db.get(User, game.analyst_id)
+
+        if game.analyst:
+            game.analyst.games_won += 1
+            game.analyst.exp += exp_breakdown.total_exp
+            game.analyst.total_hints_used += game.hints_used
+            game.analyst.total_mistakes += game.mistakes_count
+
+        # Ensure agent entity is loaded
+        if game.agent is None and game.agent_id:
+            game.agent = await db.get(User, game.agent_id)
+
+        if game.agent:
+            game.agent.games_won += 1
+            game.agent.exp += exp_breakdown.total_exp
+            game.agent.total_hints_used += game.hints_used
+            game.agent.total_mistakes += game.mistakes_count
+
+        return exp_breakdown
 
     async def submit_guess(
         self,
@@ -539,11 +597,7 @@ class SessionService:
 
                 is_victory = check_victory(game.original_text, revealed)
                 if is_victory:
-                    game.status = SessionStatus.SOLVED
-                    game.solved_at = datetime.now(timezone.utc)
-                    game.analyst.games_won += 1
-                    if game.agent:
-                        game.agent.games_won += 1
+                    await self._process_session_victory(game, db)
                     status = GuessStatus.VICTORY
                     msg = "Победа! Все символы расшифрованы! Шифрограмма полностью раскрыта."
                 else:
@@ -631,11 +685,7 @@ class SessionService:
 
                     revealed = set(game.guessed_mapping.values())
                     if check_victory(game.original_text, revealed):
-                        game.status = SessionStatus.SOLVED
-                        game.solved_at = datetime.now(timezone.utc)
-                        game.analyst.games_won += 1
-                        if game.agent:
-                            game.agent.games_won += 1
+                        await self._process_session_victory(game, db)
 
                 elif hint_t == HintType.FREQUENCY_REPORT:
                     freqs = calculate_frequencies(game.original_text)

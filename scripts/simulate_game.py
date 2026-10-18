@@ -9,16 +9,20 @@ import asyncio
 import os
 import sys
 import textwrap
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 # 1. Force UTF-8 on Windows consoles to eliminate charmap UnicodeEncodeError
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +35,7 @@ from sqlalchemy.pool import StaticPool
 
 from bot.app import create_dispatcher
 from bot.callbacks import HintActionCallback, LetterGuessCallback
-from cryptogram.catalog import get_catalog, CATALOG_QUOTES
+from cryptogram.catalog import get_catalog, get_catalog_item, CATALOG_QUOTES
 from cryptogram.engine import (
     calculate_frequencies,
     check_victory,
@@ -41,7 +45,8 @@ from cryptogram.engine import (
     generate_cipher,
     RUSSIAN_CORPUS_FREQUENCIES,
 )
-from database.models import SessionStatus, HintType
+from cryptogram.ranks import calculate_mission_exp, ExpBreakdown
+from database.models import GameSession, SessionStatus, HintType, User
 from database.session import close_db, create_sqlite_async_engine, create_session_factory, init_db
 from services.lock_manager import SessionLockManager
 from services.session_service import SessionService
@@ -275,6 +280,196 @@ def render_victory_banner(
     lines.append(f"{theme.bl}{theme.h * (w - 2)}{theme.br}")
 
     return "\n".join(lines)
+
+
+# ==============================================================================
+# Victory Military Dossier & Encoding Safety Utilities
+# ==============================================================================
+
+
+def safe_print(text: str = "", file=None, **kwargs) -> None:
+    """Print text safely with fallback for Windows console encoding limitations."""
+    target_file = file or sys.stdout
+    try:
+        print(text, file=target_file, **kwargs)
+    except UnicodeEncodeError:
+        encoding = getattr(target_file, "encoding", "ascii") or "ascii"
+        fallback_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        try:
+            print(fallback_text, file=target_file, **kwargs)
+        except Exception:
+            ascii_text = text.encode("ascii", errors="replace").decode("ascii")
+            print(ascii_text, file=target_file, **kwargs)
+
+
+def str_display_width(s: str) -> int:
+    """Calculate approximate visual column width of string in terminal considering emojis and Cyrillic."""
+    w = 0
+    for i, ch in enumerate(s):
+        if ch == "\ufe0f":
+            continue
+        is_emoji_presentation = (i + 1 < len(s) and s[i + 1] == "\ufe0f")
+        eaw = unicodedata.east_asian_width(ch)
+        if eaw in ("W", "F") or ord(ch) >= 0x1F300 or is_emoji_presentation or ord(ch) in (0x2694, 0x2B50):
+            w += 2
+        else:
+            w += 1
+    return w
+
+
+def get_safe_badge(badge: str, encoding: str = "utf-8") -> str:
+    """Safely return rank badge or fallback token if target encoding cannot represent it."""
+    try:
+        badge.encode(encoding, errors="strict")
+        return badge
+    except Exception:
+        return "[*]"
+
+
+def get_safe_progress_bar(bar_str: str, encoding: str = "utf-8") -> str:
+    """Safely return visual progress bar or ASCII bar if target encoding lacks block characters."""
+    try:
+        bar_str.encode(encoding, errors="strict")
+        return bar_str
+    except Exception:
+        return bar_str.replace("█", "=").replace("░", "-")
+
+
+def render_victory_dossier_summary(
+    game: GameSession,
+    exp_breakdown: ExpBreakdown,
+    analyst_user: Optional[User],
+    agent_user: Optional[User],
+    theme: BoxTheme = DOUBLE_THEME,
+) -> str:
+    """Render victory dossier summary card with EXP breakdown, rank badges, progress bars, and winrates."""
+    w = 72
+    inner_w = w - 4
+    enc = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
+
+    def box_row(content: str) -> str:
+        cw = str_display_width(content)
+        pad = max(0, inner_w - cw)
+        return f"{theme.v} {content}{' ' * pad} {theme.v}"
+
+    def two_col(left: str, right: str, width: int = 68) -> str:
+        space = max(1, width - str_display_width(left) - str_display_width(right))
+        return f"{left}{' ' * space}{right}"
+
+    # Quote difficulty label
+    diff_label = "NORMAL"
+    if game.is_custom_quote or not game.catalog_id:
+        diff_label = "CUSTOM"
+    elif game.catalog_id:
+        c_item = get_catalog_item(game.catalog_id)
+        if c_item and c_item.difficulty:
+            diff_label = c_item.difficulty
+
+    clean_text = "0 ошибок" if game.mistakes_count == 0 else f"{game.mistakes_count} ош."
+    autonomy_text = "0 подсказок" if game.hints_used == 0 else f"{game.hints_used} подск."
+
+    lines = []
+    lines.append(f"{theme.tl}{theme.h * (w - 2)}{theme.tr}")
+    hdr = "*** НАГРАДНОЙ ЛИСТ СПЕЦОПЕРАЦИИ И ВОЕННОЕ ДОСЬЕ ***"
+    hdr_pad = max(0, (inner_w - str_display_width(hdr)) // 2)
+    lines.append(box_row(f"{' ' * hdr_pad}{hdr}"))
+    lines.append(f"{theme.sep_l}{theme.sep_h * (w - 2)}{theme.sep_r}")
+
+    # EXP breakdown section
+    lines.append(box_row("НАЧИСЛЕНИЕ ОПЫТА ЗА СПЕЦОПЕРАЦИЮ:"))
+    lines.append(box_row(two_col(f" • Базовый опыт (Сложность: {diff_label})", f"+{exp_breakdown.base_exp} EXP", inner_w)))
+    lines.append(box_row(two_col(f" • Бонус «Чистая работа» ({clean_text})", f"+{exp_breakdown.clean_work_bonus} EXP", inner_w)))
+    lines.append(box_row(two_col(f" • Бонус «Автономность» ({autonomy_text})", f"+{exp_breakdown.autonomy_bonus} EXP", inner_w)))
+    lines.append(box_row(two_col(" • ИТОГО НАЧИСЛЕНО КАЖДОМУ", f"+{exp_breakdown.total_exp} EXP", inner_w)))
+    lines.append(f"{theme.sep_l}{theme.sep_h * (w - 2)}{theme.sep_r}")
+
+    # Analyst dossier section
+    if analyst_user:
+        a_name = analyst_user.display_name
+        if analyst_user.username and f"@{analyst_user.username}" not in a_name:
+            a_name = f"{a_name} (@{analyst_user.username})"
+        a_badge = get_safe_badge(analyst_user.current_rank_badge, enc)
+        a_rank = analyst_user.rank_title
+        a_bar = get_safe_progress_bar(analyst_user.rank_progress_bar, enc)
+        if analyst_user.next_rank_exp is not None:
+            a_exp_info = f"{analyst_user.exp} / {analyst_user.next_rank_exp} EXP"
+        else:
+            a_exp_info = f"{analyst_user.exp} EXP (Максимальное звание)"
+        a_stats = f"Побед: {analyst_user.games_won} / {analyst_user.games_played} (Винрейт: {analyst_user.win_rate}%)"
+
+        lines.append(box_row(f"ШТАБНОЙ АНАЛИТИК: {a_name}"))
+        lines.append(box_row(f" • Воинское звание:      {a_badge} {a_rank}"))
+        lines.append(box_row(f" • Прогресс опыта:       {a_exp_info}"))
+        lines.append(box_row(f" • Шкала продвижения:    {a_bar}"))
+        lines.append(box_row(f" • Боевой послужной:     {a_stats}"))
+    else:
+        lines.append(box_row("ШТАБНОЙ АНАЛИТИК: Данные отсутствуют"))
+
+    lines.append(f"{theme.sep_l}{theme.sep_h * (w - 2)}{theme.sep_r}")
+
+    # Agent dossier section
+    if agent_user:
+        g_name = agent_user.display_name
+        if agent_user.username and f"@{agent_user.username}" not in g_name:
+            g_name = f"{g_name} (@{agent_user.username})"
+        g_badge = get_safe_badge(agent_user.current_rank_badge, enc)
+        g_rank = agent_user.rank_title
+        g_bar = get_safe_progress_bar(agent_user.rank_progress_bar, enc)
+        if agent_user.next_rank_exp is not None:
+            g_exp_info = f"{agent_user.exp} / {agent_user.next_rank_exp} EXP"
+        else:
+            g_exp_info = f"{agent_user.exp} EXP (Максимальное звание)"
+        g_stats = f"Побед: {agent_user.games_won} / {agent_user.games_played} (Винрейт: {agent_user.win_rate}%)"
+
+        lines.append(box_row(f"ПОЛЕВОЙ АГЕНТ: {g_name}"))
+        lines.append(box_row(f" • Воинское звание:      {g_badge} {g_rank}"))
+        lines.append(box_row(f" • Прогресс опыта:       {g_exp_info}"))
+        lines.append(box_row(f" • Шкала продвижения:    {g_bar}"))
+        lines.append(box_row(f" • Боевой послужной:     {g_stats}"))
+    else:
+        lines.append(box_row("ПОЛЕВОЙ АГЕНТ: Данные отсутствуют"))
+
+    lines.append(f"{theme.bl}{theme.h * (w - 2)}{theme.br}")
+    return "\n".join(lines)
+
+
+async def display_simulation_victory_dossier(
+    service: SessionService,
+    game: GameSession,
+    theme: BoxTheme = DOUBLE_THEME,
+) -> str:
+    """Fetch updated user records from DB, calculate EXP breakdown, render dossier, and print it."""
+    async with service._get_db() as db:
+        analyst_user = await db.get(User, game.analyst_id) if game.analyst_id else None
+        agent_user = await db.get(User, game.agent_id) if game.agent_id else None
+    if analyst_user is None and game.analyst_id:
+        analyst_user = await service.get_or_create_user(game.analyst_id)
+    if agent_user is None and game.agent_id:
+        agent_user = await service.get_or_create_user(game.agent_id)
+
+    diff_val = "MEDIUM"
+    is_custom_val = bool(game.is_custom_quote or not game.catalog_id)
+    if game.catalog_id:
+        cat_item = get_catalog_item(game.catalog_id)
+        if cat_item and cat_item.difficulty:
+            diff_val = cat_item.difficulty
+
+    exp_breakdown = calculate_mission_exp(
+        difficulty=diff_val,
+        mistakes_count=game.mistakes_count,
+        hints_used=game.hints_used,
+        is_custom=is_custom_val,
+    )
+
+    dossier_box = render_victory_dossier_summary(
+        game=game,
+        exp_breakdown=exp_breakdown,
+        analyst_user=analyst_user,
+        agent_user=agent_user,
+        theme=theme,
+    )
+    safe_print("\n" + dossier_box)
+    return dossier_box
 
 
 # ==============================================================================
@@ -536,6 +731,10 @@ class AutoSimulator:
         print(self.c.bold("=" * 80))
         print(f"Текст депеши: \"{phrase}\"")
         print(f"Статистика: Статус={final_game.status.value} | Ошибок={final_game.mistakes_count} | Подсказок={final_game.hints_used} | Время={elapsed:.2f}с")
+
+        theme = DOUBLE_THEME if not self.config.no_color else ASCII_THEME
+        await display_simulation_victory_dossier(service, final_game, theme=theme)
+
         print(self.c.green("Симуляция завершена успешно. Код выхода: 0\n"))
         return 0
 
@@ -741,15 +940,17 @@ class InteractiveSimulator:
         # Final Victory
         elapsed = (datetime.now() - start_time).total_seconds()
         final_game = await service.get_session_by_code(code)
+        theme = DOUBLE_THEME if not self.config.no_color else ASCII_THEME
         banner = render_victory_banner(
             original_text=phrase,
             total_unique=final_game.total_unique_letters,
             mistakes_count=final_game.mistakes_count,
             hints_used=final_game.hints_used,
             elapsed_seconds=elapsed,
-            theme=DOUBLE_THEME if not self.config.no_color else ASCII_THEME,
+            theme=theme,
         )
-        print("\n" + banner)
+        safe_print("\n" + banner)
+        await display_simulation_victory_dossier(service, final_game, theme=theme)
         return 0
 
 

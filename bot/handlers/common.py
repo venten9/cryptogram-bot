@@ -9,8 +9,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot.callbacks import MenuCallback
-from bot.keyboards import build_agent_symbol_keyboard, build_main_menu_keyboard
-from bot.utils import NotifierService
+from bot.keyboards import (
+    build_agent_symbol_keyboard,
+    build_main_menu_keyboard,
+    build_profile_keyboard,
+)
+from bot.utils import NotifierService, safe_edit_callback
 from database.models import User
 from services.session_service import (
     CreatorCannotJoinAsAgent,
@@ -208,3 +212,89 @@ async def handle_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer(
             welcome_text, reply_markup=build_main_menu_keyboard(), parse_mode="HTML"
         )
+
+
+def render_player_profile(user: User) -> str:
+    """Render stylized military dossier card with rank, EXP progress, and operational record."""
+    name = html.escape(user.display_name)
+    badge = user.current_rank_badge
+    rank = html.escape(user.rank_title)
+    exp = user.exp
+    next_exp = user.next_rank_exp
+    bar = user.rank_progress_bar
+
+    if next_exp is not None:
+        exp_line = f"• Опыт: <b>{exp}</b> / <b>{next_exp}</b> EXP"
+    else:
+        exp_line = f"• Опыт: <b>{exp}</b> EXP (Максимальное звание)"
+
+    lines = [
+        "🎖 <b>ЛИЧНОЕ ДЕЛО ВОЕННОСЛУЖАЩЕГО</b>",
+        "──────────────────────────────",
+        f"👤 <b>Позывной:</b> {name}",
+        f"🎖 <b>Звание:</b> {badge} {rank}",
+        exp_line,
+        f"📈 <b>Прогресс:</b> <code>{bar}</code>",
+        "",
+        "📊 <b>Боевой послужной список:</b>",
+        f"• Всего игр: <b>{user.games_played}</b>",
+        f"• Побед: <b>{user.games_won}</b> (Винрейт: <b>{user.win_rate}%</b>)",
+        f"• В роли Аналитика: <b>{user.games_as_analyst}</b>",
+        f"• В роли Агента: <b>{user.games_as_agent}</b>",
+        "",
+        "🔍 <b>Качество дешифровки:</b>",
+        f"• Ошибок допущено: <b>{user.total_mistakes}</b>",
+        f"• Подсказок использовано: <b>{user.total_hints_used}</b>",
+        "──────────────────────────────",
+    ]
+    return "\n".join(lines)
+
+
+format_player_profile = render_player_profile
+
+
+@common_router.message(Command("profile"))
+async def handle_profile_command(
+    message: Message,
+    session_service: SessionService,
+) -> None:
+    """Render player profile dossier via /profile command."""
+    if not message.from_user:
+        return
+    user = await session_service.get_or_create_user(
+        telegram_id=message.from_user.id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name or "",
+        last_name=message.from_user.last_name,
+    )
+    text = render_player_profile(user)
+    kb = build_profile_keyboard()
+    await message.answer(text=text, reply_markup=kb, parse_mode="HTML")
+
+
+@common_router.callback_query(MenuCallback.filter(F.action == "profile"))
+@common_router.callback_query(F.data == "menu:profile")
+async def handle_profile_callback(
+    callback: CallbackQuery,
+    session_service: SessionService,
+) -> None:
+    """Render or refresh player profile dossier via inline callback."""
+    if not callback.from_user:
+        return
+    user = await session_service.get_or_create_user(
+        telegram_id=callback.from_user.id,
+        username=callback.from_user.username,
+        first_name=callback.from_user.first_name or "",
+        last_name=callback.from_user.last_name,
+    )
+    text = render_player_profile(user)
+    kb = build_profile_keyboard()
+
+    await callback.answer()
+    await safe_edit_callback(
+        callback=callback,
+        text=text,
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+

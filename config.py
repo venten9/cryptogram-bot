@@ -84,11 +84,31 @@ class Settings(BaseSettings):
             )
 
 
-@lru_cache(maxsize=1)
+import threading
+
+_settings_lock = threading.Lock()
+_cached_settings: Optional[Settings] = None
+
+
 def get_settings() -> Settings:
     """Return cached singleton instance of application settings.
 
     To clear the cache during test execution:
         get_settings.cache_clear()
     """
-    return Settings()
+    global _cached_settings
+    if _cached_settings is None:
+        with _settings_lock:
+            if _cached_settings is None:
+                _cached_settings = Settings()
+    return _cached_settings
+
+
+def _clear_settings_cache() -> None:
+    """Thread-safe cache invalidation for testing environments."""
+    global _cached_settings
+    with _settings_lock:
+        _cached_settings = None
+
+
+get_settings.cache_clear = _clear_settings_cache

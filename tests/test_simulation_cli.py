@@ -247,3 +247,120 @@ class TestSimulationCliProgrammatic:
 
         exit_code = main(["--auto", "--quote", "0", "--no-color"])
         assert exit_code == 0
+
+
+# ==============================================================================
+# Tier 4: Victory Dossier & Encoding Safety Tests (Milestone M4)
+# ==============================================================================
+
+
+@pytest.mark.e2e
+class TestSimulationCliVictoryDossierAndEncoding:
+    """Tests victory dossier summary rendering, EXP breakdown, rank progression, and encoding safety."""
+
+    def test_cli_auto_victory_dossier_content(self):
+        """CLI: --auto displays full victory dossier with EXP breakdown and player ranks."""
+        result = run_cli(["--auto", "--quote", "0", "--no-color"])
+        assert result.returncode == 0
+        assert "Traceback (most recent call last)" not in result.stderr
+
+        out = result.stdout
+        # 1. Dossier header
+        assert "НАГРАДНОЙ ЛИСТ СПЕЦОПЕРАЦИИ И ВОЕННОЕ ДОСЬЕ" in out
+
+        # 2. EXP Breakdown section
+        assert "НАЧИСЛЕНИЕ ОПЫТА ЗА СПЕЦОПЕРАЦИЮ:" in out
+        assert "Базовый опыт (Сложность: EASY)" in out
+        assert "+100 EXP" in out
+        assert "Бонус «Чистая работа» (0 ошибок)" in out
+        assert "+50 EXP" in out
+        assert "Бонус «Автономность»" in out
+        assert "ИТОГО НАЧИСЛЕНО КАЖДОМУ" in out
+        assert "+150 EXP" in out
+
+        # 3. Analyst Dossier
+        assert "ШТАБНОЙ АНАЛИТИК: Штабной (@analyst_hq)" in out
+        assert "Воинское звание:      🎗️ Ефрейтор" in out
+        assert "Прогресс опыта:       150 / 250 EXP" in out
+        assert "Шкала продвижения:    [███░░░░░░░] 33%" in out
+        assert "Боевой послужной:     Побед: 1 / 1 (Винрейт: 100.0%)" in out
+
+        # 4. Agent Dossier
+        assert "ПОЛЕВОЙ АГЕНТ: Агент 007 (@field_agent)" in out
+        assert "Воинское звание:      🎗️ Ефрейтор" in out
+        assert "Прогресс опыта:       150 / 250 EXP" in out
+        assert "Шкала продвижения:    [███░░░░░░░] 33%" in out
+        assert "Боевой послужной:     Побед: 1 / 1 (Винрейт: 100.0%)" in out
+
+    def test_cli_auto_custom_quote_exp_breakdown(self):
+        """CLI: custom Russian text defaults to MEDIUM base EXP (+200 EXP)."""
+        phrase = "СЕКРЕТНЫЙ ШИФР ДЛЯ ПРОВЕРКИ СИСТЕМЫ РАНГОВ"
+        result = run_cli(["--auto", "--custom", phrase, "--no-color"])
+        assert result.returncode == 0
+        out = result.stdout
+        assert "Базовый опыт (Сложность: CUSTOM)" in out
+        assert "+200 EXP" in out
+        assert "ИТОГО НАЧИСЛЕНО КАЖДОМУ" in out
+
+    def test_cli_auto_hard_quote_exp_and_higher_rank(self):
+        """CLI: HARD quote awards +300 base EXP and advances player to Младший сержант."""
+        result = run_cli(["--auto", "--quote", "14", "--no-color"])
+        assert result.returncode == 0
+        out = result.stdout
+        assert "Базовый опыт (Сложность: HARD)" in out
+        assert "+300 EXP" in out
+        # With 350 EXP, rank is Младший сержант (level 3, threshold 250, badge 🥉)
+        assert "Младший сержант" in out
+        assert "350 / 450 EXP" in out
+        assert "[█████░░░░░] 50%" in out
+
+    def test_unit_safe_print_fallback(self):
+        """Unit test: safe_print gracefully falls back on strict non-UTF-8 stream without crashing."""
+        import io
+        from scripts.simulate_game import safe_print
+
+        buf = io.BytesIO()
+        strict_stream = io.TextIOWrapper(buf, encoding="ascii", errors="strict")
+        # Should not raise UnicodeEncodeError
+        safe_print("🪖 Рядовой: [██████░░░░] 60%", file=strict_stream)
+        strict_stream.flush()
+        written = buf.getvalue().decode("ascii")
+        assert "?" in written or "60%" in written
+
+    def test_unit_get_safe_badge_and_bar(self):
+        """Unit test: get_safe_badge and get_safe_progress_bar return safe fallbacks on restrictive encodings."""
+        from scripts.simulate_game import get_safe_badge, get_safe_progress_bar
+
+        # UTF-8 supports emojis and blocks
+        assert get_safe_badge("🪖", "utf-8") == "🪖"
+        assert get_safe_progress_bar("[██████░░░░] 60%", "utf-8") == "[██████░░░░] 60%"
+
+        # ASCII falls back safely
+        assert get_safe_badge("🪖", "ascii") == "[*]"
+        assert get_safe_progress_bar("[██████░░░░] 60%", "ascii") == "[======----] 60%"
+
+    def test_unit_render_victory_dossier_summary(self):
+        """Unit test: render_victory_dossier_summary handles missing users and formats cleanly."""
+        from cryptogram.ranks import ExpBreakdown
+        from database.models import GameSession, SessionStatus
+        from scripts.simulate_game import render_victory_dossier_summary, ASCII_THEME
+
+        game = GameSession(
+            id=1,
+            invite_code="test1234",
+            status=SessionStatus.SOLVED,
+            original_text="ТЕСТ",
+            normalized_text="ТЕСТ",
+            cipher_mapping={"Т": 1, "Е": 2, "С": 3},
+            guessed_mapping={"1": "Т", "2": "Е", "3": "С"},
+            total_unique_letters=3,
+            mistakes_count=0,
+            hints_used=0,
+            is_custom_quote=True,
+        )
+        exp = ExpBreakdown(base_exp=200, clean_work_bonus=50, autonomy_bonus=50, total_exp=300)
+        card = render_victory_dossier_summary(game, exp, analyst_user=None, agent_user=None, theme=ASCII_THEME)
+        assert "НАГРАДНОЙ ЛИСТ" in card
+        assert "+200 EXP" in card
+        assert "+300 EXP" in card
+        assert "ШТАБНОЙ АНАЛИТИК: Данные отсутствуют" in card
