@@ -146,6 +146,20 @@ class TestSoloServiceEngine:
         cancelled = await solo_service.cancel_session(game.id, 111555)
         assert cancelled.status == SessionStatus.CANCELLED
 
+    async def test_solo_freq_calculation(self, solo_service: SessionService):
+        """Verify frequency report generation for solo session."""
+        from cryptogram.engine import calculate_frequencies
+        game = await solo_service.create_solo_session(
+            player_tg_id=444666,
+            custom_text="АБРАКАДАБРА",
+        )
+        freqs = calculate_frequencies(game.original_text)
+        assert len(freqs) > 0
+        assert freqs[0].letter == "А"
+        assert freqs[0].char == "А"
+        assert freqs[0].count == 5
+
+
 
 class TestSoloUiHandlers:
     """Test suite verifying Telegram UI navigation for solo mode."""

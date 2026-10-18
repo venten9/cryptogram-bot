@@ -293,7 +293,7 @@ async def on_solo_freq_requested(
     freqs = calculate_frequencies(game.original_text)
     report_lines = ["📊 <b>ЧАСТОТНАЯ РАДИОГРАММА ШТАБА:</b>\n"]
     for f in freqs[:10]:
-        report_lines.append(f"• Буква <b>'{f.char}'</b>: {f.count} раз ({f.percentage:.1f}%)")
+        report_lines.append(f"• Буква <b>'{f.letter}'</b>: {f.count} раз ({f.percentage:.1f}%)")
 
     report_lines.append("\n<i>Используйте частотность для подбора наиболее вероятных букв.</i>")
     text = "\n".join(report_lines)

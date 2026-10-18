@@ -11,6 +11,11 @@ class FrequencyItem:
     count: int
     percentage: float  # e.g., 10.97
 
+    @property
+    def char(self) -> str:
+        """Alias for letter."""
+        return self.letter
+
 
 @dataclass(frozen=True)
 class CipherData:
