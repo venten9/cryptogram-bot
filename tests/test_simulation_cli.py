@@ -129,7 +129,7 @@ class TestSimulationCliAutoMode:
 class TestSimulationCliValidationErrors:
     """Validates CLI argument errors report informative messages and exit cleanly."""
 
-    @pytest.mark.parametrize("invalid_quote", ["999", "-1", "20", "100"])
+    @pytest.mark.parametrize("invalid_quote", ["999", "-1", "60", "100"])
     def test_invalid_quote_index_rejected(self, invalid_quote):
         """CLI rejects out-of-range quote index with error code and no traceback."""
         result = run_cli(["--auto", "--quote", invalid_quote])
@@ -139,7 +139,7 @@ class TestSimulationCliValidationErrors:
         err_output = (result.stderr + result.stdout).lower()
         assert any(
             kw in err_output
-            for kw in ["quote", "индекс", "диапазон", "0", "19", "range", "error", "invalid"]
+            for kw in ["quote", "индекс", "диапазон", "0", "59", "range", "error", "invalid"]
         ), f"Missing informative error message in: {result.stderr}"
 
     @pytest.mark.parametrize(

@@ -247,8 +247,8 @@ class TestCatalog:
 
     def test_catalog_minimum_size(self):
         catalog = get_catalog()
-        assert len(catalog) >= 15
-        assert len(catalog) == 20
+        assert len(catalog) >= 20
+        assert len(catalog) == 60
 
     def test_catalog_item_schema(self):
         catalog = get_catalog()

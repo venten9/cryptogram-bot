@@ -339,7 +339,7 @@ class TestCatalogAndDifficultyIntegrity:
         # Case insensitivity check
         easy_upper = get_catalog_by_difficulty("EASY")
         easy_lower = get_catalog_by_difficulty("easy")
-        assert len(easy_upper) == len(easy_lower) == 7
+        assert len(easy_upper) == len(easy_lower) == 20
 
     def test_catalog_item_by_id_invalid(self):
         """Query catalog with non-existent IDs."""
@@ -355,7 +355,7 @@ class TestCatalogAndDifficultyIntegrity:
     def test_all_catalog_items_generate_valid_ciphers(self):
         """Every single catalog item must generate a valid bijective cipher without errors."""
         catalog = get_catalog()
-        assert len(catalog) == 20
+        assert len(catalog) == 60
         for item in catalog:
             cipher = generate_cipher(item.text, seed=len(item.id))
             assert cipher.total_letters > 0

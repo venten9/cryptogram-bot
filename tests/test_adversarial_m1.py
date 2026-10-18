@@ -313,7 +313,7 @@ class TestAdversarialAttacks:
     def test_exhaustive_catalog_verification_all_quotes_50_seeds(self):
         """Every single quote in RAW_CATALOG tested across 50 distinct random seeds (1,000 runs)."""
         catalog = get_catalog()
-        assert len(catalog) == 20
+        assert len(catalog) == 60
 
         for item in catalog:
             # Check catalog metadata

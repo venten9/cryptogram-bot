@@ -779,7 +779,7 @@ class InteractiveSimulator:
                 print("\nКАТАЛОГ ДЕПЕШ:")
                 for idx, it in enumerate(catalog):
                     print(f"[{idx:2d}] «{it.title}» ({it.difficulty}, {it.category})")
-                q_idx_str = safe_input("Введите номер депеши [0-19, по умолч. 0]: ").strip()
+                q_idx_str = safe_input(f"Введите номер депеши [0-{len(catalog) - 1}, по умолч. 0]: ").strip()
                 q_idx = int(q_idx_str) if q_idx_str.isdigit() and 0 <= int(q_idx_str) < len(catalog) else 0
                 catalog_item = catalog[q_idx]
                 phrase = catalog_item.text
@@ -975,7 +975,7 @@ def parse_args(argv: Optional[list] = None) -> SimulationConfig:
 
     text_group = parser.add_mutually_exclusive_group()
     text_group.add_argument(
-        "--quote", type=int, default=None, help="Quote index from catalog (0-19)"
+        "--quote", type=int, default=None, help="Quote index from catalog (0-59)"
     )
     text_group.add_argument(
         "--custom", type=str, default=None, help="Custom Russian text for cryptogram"
