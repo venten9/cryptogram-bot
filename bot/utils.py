@@ -285,6 +285,54 @@ class NotifierService:
 
     async def notify_victory(self, game: GameSession) -> None:
         """Broadcast victory screens and play-again options to both players."""
+        if game.campaign_chapter:
+            from bot.keyboards import build_campaign_victory_keyboard
+            from cryptogram.campaign_data import TOTAL_CHAPTERS, get_campaign_chapter
+
+            ch = get_campaign_chapter(game.campaign_chapter)
+            chapter_title = html.escape(ch.title) if ch else f"Глава {game.campaign_chapter}"
+            chapter_year = f" ({ch.year} г.)" if ch and ch.year else ""
+            clean_text = html.escape(ch.clean_text) if ch else html.escape(game.original_text)
+            victory_summary = html.escape(ch.victory_summary) if ch and ch.victory_summary else ""
+            next_unlocked = game.campaign_chapter < TOTAL_CHAPTERS
+
+            campaign_text = (
+                f"🏆 <b>ДЕПЕША УСПЕШНО РАСШИФРОВАНА!</b>\n"
+                f"🎖 <b>Глава {game.campaign_chapter}: {chapter_title}</b>{chapter_year}\n"
+                "──────────────────────────────\n"
+                "<b>Подлинный текст директивы:</b>\n"
+                f"<pre>{clean_text}</pre>\n\n"
+                f"📜 <b>Историческая сводка:</b>\n"
+                f"{victory_summary}\n"
+                "──────────────────────────────\n"
+                f"📊 <b>Итоги миссии:</b>\n"
+                f"• Уникальных символов: {game.total_unique_letters}\n"
+                f"• Подсказок Штаба: {game.hints_used}\n"
+                f"• Ошибок Агента: {game.mistakes_count}\n\n"
+                "<i>Штаб выражает благодарность за восстановление секретной директивы!</i>"
+            )
+            kb = build_campaign_victory_keyboard(
+                current_chapter_id=game.campaign_chapter,
+                next_unlocked=next_unlocked,
+            )
+
+            targets = []
+            if game.agent_chat_id and game.agent_message_id:
+                targets.append((game.agent_chat_id, game.agent_message_id))
+            if game.analyst_chat_id and game.analyst_message_id:
+                if (game.analyst_chat_id, game.analyst_message_id) not in targets:
+                    targets.append((game.analyst_chat_id, game.analyst_message_id))
+
+            for chat_id, message_id in targets:
+                await safe_edit_message(
+                    bot=self.bot,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=campaign_text,
+                    reply_markup=kb,
+                )
+            return
+
         from bot.keyboards import build_victory_keyboard
 
         agent_text = (

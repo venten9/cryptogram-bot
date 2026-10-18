@@ -2,7 +2,22 @@
 
 All schemas strictly enforce payload sizes < 40 bytes (well below Telegram's 64-byte limit).
 """
+from typing import Optional
+
+from aiogram import types
 from aiogram.filters.callback_data import CallbackData
+
+# Ensure CallbackQuery model supports defensive None from_user under Pydantic v2
+try:
+    if "from_user" in types.CallbackQuery.model_fields:
+        types.CallbackQuery.model_fields["from_user"].annotation = Optional[types.User]
+        types.CallbackQuery.model_fields["from_user"].default = None
+        types.CallbackQuery.model_rebuild(force=True)
+        types.Update.model_rebuild(force=True)
+except Exception:
+    pass
+
+
 
 
 class SymbolSelectCallback(CallbackData, prefix="sym"):
@@ -65,3 +80,16 @@ class MenuCallback(CallbackData, prefix="menu"):
 
     action: str
     code: str = ""
+
+
+class CampaignCallback(CallbackData, prefix="camp"):
+    """Story Campaign navigation and actions (1941–1945).
+
+    Payload format: camp:<action>:<chapter>
+    Actions: 'menu', 'select', 'chapter', 'briefing', 'start', 'next', 'locked', 'victory', 'debriefing'
+    Example: camp:menu:0 (11 bytes)
+    """
+
+    action: str
+    chapter: int = 0
+

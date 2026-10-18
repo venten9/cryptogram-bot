@@ -581,6 +581,25 @@ class SessionService:
         game.status = SessionStatus.SOLVED
         game.solved_at = datetime.now(timezone.utc)
 
+        if game.campaign_chapter:
+            from services.campaign_service import CampaignService
+
+            target_user_id = game.agent_id or game.analyst_id
+            if target_user_id:
+                is_first, exp_awarded = await CampaignService.record_chapter_completion(
+                    db=db,
+                    user_id=target_user_id,
+                    chapter_id=game.campaign_chapter,
+                    mistakes_count=game.mistakes_count,
+                    hints_used=game.hints_used,
+                )
+                return ExpBreakdown(
+                    base_exp=exp_awarded,
+                    clean_work_bonus=0,
+                    autonomy_bonus=0,
+                    total_exp=exp_awarded,
+                )
+
         # Resolve quote difficulty for EXP engine
         difficulty = "MEDIUM"
         is_custom = bool(game.is_custom_quote or not game.catalog_id)

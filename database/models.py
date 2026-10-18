@@ -31,11 +31,13 @@ from sqlalchemy import (
     String,
     Text,
     JSON,
+    event,
     func,
+    inspect,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, synonym
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, synonym
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -110,6 +112,14 @@ class User(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    campaign_progress: Mapped[List["CampaignProgress"]] = relationship(
+        "CampaignProgress",
+        foreign_keys="[CampaignProgress.user_id]",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="CampaignProgress.chapter_id.asc()",
+    )
 
     @property
     def display_name(self) -> str:
@@ -150,6 +160,31 @@ class User(Base):
     def rank_progress_bar(self) -> str:
         """10-segment Unicode progress bar string."""
         return calculate_rank_progress(self.exp if self.exp is not None else 0)[2]
+
+    @property
+    def campaign_completed_count(self) -> int:
+        """Count of completed unique campaign chapters (0 to 5)."""
+        insp = inspect(self, raiseerr=False)
+        if insp is not None:
+            if "campaign_progress" in insp.dict:
+                records = insp.dict["campaign_progress"]
+            else:
+                records = None
+        else:
+            records = getattr(self, "campaign_progress", None)
+        if not records:
+            return 0
+        return sum(1 for cp in records if getattr(cp, "is_completed", False))
+
+    @property
+    def is_campaign_completed(self) -> bool:
+        """True if all 5 chapters of the historical campaign have been completed."""
+        return self.campaign_completed_count >= 5
+
+    @property
+    def campaign_status_display(self) -> str:
+        """Formatted string for military dossier ('X/5 глав')."""
+        return f"{self.campaign_completed_count}/5 глав"
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r}>"
@@ -197,6 +232,7 @@ class GameSession(Base):
     is_custom = synonym("is_custom_quote")
     catalog_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     is_solo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    campaign_chapter: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
     # Active Telegram UI coordinates for in-place edit_message_text synchronization
     analyst_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
@@ -314,3 +350,74 @@ class HintLog(Base):
 
     def __repr__(self) -> str:
         return f"<HintLog id={self.id} type={self.hint_type} session={self.session_id}>"
+
+
+class CampaignProgress(Base):
+    """Tracks a user's progression, completion, and replays for an individual campaign chapter."""
+    __tablename__ = "campaign_progress"
+    __table_args__ = (
+        Index("ix_campaign_user_chapter", "user_id", "chapter_id", unique=True),
+        Index("ix_campaign_user_completed", "user_id", "is_completed"),
+    )
+
+    # Primary identification
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chapter_id: Mapped[int] = mapped_column(Integer, nullable=False)  # 1 to 5
+
+    # Chapter state
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    completion_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Audit timestamps
+    first_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Bi-directional relationship with User
+    user: Mapped["User"] = relationship("User", back_populates="campaign_progress", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<CampaignProgress user={self.user_id} ch={self.chapter_id} done={self.is_completed} count={self.completion_count}>"
+
+
+@event.listens_for(Session, "before_flush")
+def _sync_campaign_progress_to_user_identity_map(session, flush_context, instances):
+    """Synchronize CampaignProgress with cached User instances in local identity map."""
+    for obj in session.new:
+        if isinstance(obj, CampaignProgress) and obj.user_id:
+            user_key = session.identity_key(User, obj.user_id)
+            if user_key in session.identity_map:
+                user = session.identity_map[user_key]
+                state = inspect(user)
+                attr = state.manager["campaign_progress"].impl
+                if "campaign_progress" in state.dict:
+                    coll = state.dict["campaign_progress"]
+                    if obj not in coll:
+                        coll.append(obj)
+                        try:
+                            coll.sort(key=lambda x: getattr(x, "chapter_id", 0))
+                        except Exception:
+                            pass
+                else:
+                    attr.set_committed_value(state, state.dict, [obj])
+
+    for obj in session.deleted:
+        if isinstance(obj, CampaignProgress) and obj.user_id:
+            user_key = session.identity_key(User, obj.user_id)
+            if user_key in session.identity_map:
+                user = session.identity_map[user_key]
+                state = inspect(user)
+                if "campaign_progress" in state.dict:
+                    coll = state.dict["campaign_progress"]
+                    if obj in coll:
+                        coll.remove(obj)
+
+

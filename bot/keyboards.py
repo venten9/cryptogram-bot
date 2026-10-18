@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import (
+    CampaignCallback,
     CatalogCallback,
     HintActionCallback,
     LetterGuessCallback,
@@ -29,6 +30,10 @@ def build_main_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text="🎯 Одиночная игра (Соло)",
         callback_data=MenuCallback(action="solo"),
+    )
+    builder.button(
+        text="🎖 Сюжетная кампания (1941–1945)",
+        callback_data=CampaignCallback(action="menu", chapter=0),
     )
     builder.button(
         text="📜 Выбрать депешу из каталога (на двоих)",
@@ -363,6 +368,97 @@ def build_profile_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+
+def build_campaign_menu_keyboard(
+    completed_chapters: Union[Set[int], Iterable[int], int, None] = None,
+) -> InlineKeyboardMarkup:
+    """Build interactive chapter selection keyboard with sequential status badges.
+
+    Status badges:
+    - ✅: Chapter is completed (replayable at any time)
+    - 🔓: Chapter is currently unlocked and ready for decryption
+    - 🔒: Chapter is classified/locked until previous chapter is solved
+    """
+    if isinstance(completed_chapters, int):
+        completed_set = set(range(1, completed_chapters + 1))
+    elif isinstance(completed_chapters, (set, list, tuple)):
+        completed_set = set(completed_chapters)
+    else:
+        completed_set = set()
+
+    from cryptogram.campaign_data import CAMPAIGN_CHAPTERS
+
+    builder = InlineKeyboardBuilder()
+    for ch_id in range(1, 6):
+        ch = CAMPAIGN_CHAPTERS.get(ch_id)
+        title = ch.title if ch else f"Глава {ch_id}"
+        if ch_id in completed_set:
+            text = f"✅ Глава {ch_id}: {title}"
+            cb = CampaignCallback(action="chapter", chapter=ch_id)
+        elif ch_id == 1 or (ch_id - 1) in completed_set:
+            text = f"🔓 Глава {ch_id}: {title}"
+            cb = CampaignCallback(action="chapter", chapter=ch_id)
+        else:
+            text = f"🔒 Глава {ch_id}: [Засекречено]"
+            cb = CampaignCallback(action="locked", chapter=ch_id)
+        builder.button(text=text, callback_data=cb)
+
+    builder.button(
+        text="◀️ Главное меню",
+        callback_data=MenuCallback(action="main"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def build_campaign_briefing_keyboard(
+    chapter_id: int = 1,
+    chapter: Optional[int] = None,
+) -> InlineKeyboardMarkup:
+    """Build historical pre-mission briefing keyboard."""
+    ch = chapter if chapter is not None else chapter_id
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🎯 Приступить к дешифровке",
+        callback_data=CampaignCallback(action="start", chapter=ch),
+    )
+    builder.button(
+        text="◀️ К выбору глав",
+        callback_data=CampaignCallback(action="menu", chapter=0),
+    )
+    builder.button(
+        text="🏠 Главное меню",
+        callback_data=MenuCallback(action="main"),
+    )
+    builder.adjust(1, 2)
+    return builder.as_markup()
+
+
+def build_campaign_victory_keyboard(
+    current_chapter_id: int = 1,
+    next_unlocked: bool = True,
+    chapter: Optional[int] = None,
+) -> InlineKeyboardMarkup:
+    """Build victory debriefing keyboard with next chapter transition."""
+    ch = chapter if chapter is not None else current_chapter_id
+    builder = InlineKeyboardBuilder()
+    if ch < 5 and next_unlocked:
+        builder.button(
+            text="Перейти к следующей главе ➡️",
+            callback_data=CampaignCallback(action="chapter", chapter=ch + 1),
+        )
+    builder.button(
+        text="📜 Выбор глав",
+        callback_data=CampaignCallback(action="menu", chapter=0),
+    )
+    builder.button(
+        text="🏠 Главное меню",
+        callback_data=MenuCallback(action="main"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 # Aliases for cross-report compatibility
 get_main_menu_keyboard = build_main_menu_keyboard
 get_catalog_keyboard = build_catalog_keyboard
@@ -374,4 +470,10 @@ get_alphabet_picker_keyboard = build_agent_alphabet_keyboard
 build_play_again_keyboard = build_victory_keyboard
 get_victory_keyboard = build_victory_keyboard
 get_profile_keyboard = build_profile_keyboard
+build_campaign_chapters_keyboard = build_campaign_menu_keyboard
+get_campaign_menu_keyboard = build_campaign_menu_keyboard
+build_chapter_briefing_keyboard = build_campaign_briefing_keyboard
+get_campaign_briefing_keyboard = build_campaign_briefing_keyboard
+get_campaign_victory_keyboard = build_campaign_victory_keyboard
+
 

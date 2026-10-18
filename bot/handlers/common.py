@@ -298,6 +298,7 @@ def render_player_profile(user: User) -> str:
         f"• Побед: <b>{user.games_won}</b> (Винрейт: <b>{user.win_rate}%</b>)",
         f"• В роли Аналитика: <b>{user.games_as_analyst}</b>",
         f"• В роли Агента: <b>{user.games_as_agent}</b>",
+        f"• Кампания: <b>{user.campaign_status_display}</b>",
         "",
         "🔍 <b>Качество дешифровки:</b>",
         f"• Ошибок допущено: <b>{user.total_mistakes}</b>",

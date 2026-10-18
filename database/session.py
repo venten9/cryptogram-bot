@@ -139,6 +139,36 @@ def _migrate_sqlite_schema(sync_conn) -> None:
         if "is_solo" not in existing_session_cols:
             sync_conn.exec_driver_sql("ALTER TABLE game_sessions ADD COLUMN is_solo BOOLEAN NOT NULL DEFAULT 0;")
             logger.info("Migrated game_sessions table: added column is_solo")
+        if "campaign_chapter" not in existing_session_cols:
+            sync_conn.exec_driver_sql("ALTER TABLE game_sessions ADD COLUMN campaign_chapter INTEGER NULL;")
+            logger.info("Migrated game_sessions table: added column campaign_chapter")
+
+    # Ensure campaign_progress table and indices exist idempotently
+    sync_conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS campaign_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id BIGINT NOT NULL,
+            chapter_id INTEGER NOT NULL,
+            is_completed BOOLEAN NOT NULL DEFAULT 0,
+            completion_count INTEGER NOT NULL DEFAULT 0,
+            first_completed_at DATETIME NULL,
+            last_completed_at DATETIME NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        );
+        """
+    )
+    sync_conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_campaign_user_chapter ON campaign_progress (user_id, chapter_id);"
+    )
+    sync_conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_campaign_user_completed ON campaign_progress (user_id, is_completed);"
+    )
+    sync_conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_campaign_progress_user_id ON campaign_progress (user_id);"
+    )
 
 
 
