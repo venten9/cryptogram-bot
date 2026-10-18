@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# SQLite database files and WAL journal files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+cryptogram.db*
+bot_games.db*
+test_*.db*
+
+# Testing & Pytest artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Editor & OS artifacts
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Agent system directories
+.agents/
