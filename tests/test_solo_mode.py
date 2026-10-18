@@ -57,6 +57,7 @@ class TestSoloServiceEngine:
             player_tg_id=777111,
             username="solo_operative",
             first_name="Агент Соло",
+            last_name="Бондов",
             difficulty="MEDIUM",
         )
 

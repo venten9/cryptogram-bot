@@ -362,6 +362,7 @@ class SessionService:
         seed: Optional[int] = None,
         username: Optional[str] = None,
         first_name: str = "",
+        last_name: Optional[str] = None,
         db_session: Optional[AsyncSession] = None,
     ) -> GameSession:
         """Create a new game room with bijective cipher mapping in WAITING_AGENT status."""
@@ -376,6 +377,7 @@ class SessionService:
                 telegram_id=creator_tg_id,
                 username=username,
                 first_name=first_name,
+                last_name=last_name,
                 db_session=db,
             )
             invite_code = await self._generate_unique_invite_code(db)
@@ -407,6 +409,7 @@ class SessionService:
         seed: Optional[int] = None,
         username: Optional[str] = None,
         first_name: str = "",
+        last_name: Optional[str] = None,
         db_session: Optional[AsyncSession] = None,
     ) -> GameSession:
         """Create a solo game room where player acts as Agent against automated Headquarters.
@@ -455,6 +458,7 @@ class SessionService:
                 telegram_id=player_tg_id,
                 username=username,
                 first_name=first_name,
+                last_name=last_name,
                 db_session=db,
             )
 
