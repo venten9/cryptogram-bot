@@ -196,6 +196,7 @@ class GameSession(Base):
     is_custom_quote: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_custom = synonym("is_custom_quote")
     catalog_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    is_solo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Active Telegram UI coordinates for in-place edit_message_text synchronization
     analyst_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)

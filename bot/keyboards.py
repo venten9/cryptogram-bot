@@ -24,14 +24,18 @@ DIFFICULTY_ICONS = {
 
 
 def build_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Build Analyst HQ initial main menu keyboard."""
+    """Build initial main menu keyboard with Solo and Coop options."""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📜 Выбрать депешу из каталога",
+        text="🎯 Одиночная игра (Соло)",
+        callback_data=MenuCallback(action="solo"),
+    )
+    builder.button(
+        text="📜 Выбрать депешу из каталога (на двоих)",
         callback_data=MenuCallback(action="catalog"),
     )
     builder.button(
-        text="✍️ Ввести свой текст",
+        text="✍️ Ввести свой текст (для двоих)",
         callback_data=MenuCallback(action="custom"),
     )
     builder.button(
@@ -44,6 +48,34 @@ def build_main_menu_keyboard() -> InlineKeyboardMarkup:
     )
     builder.adjust(1)
     return builder.as_markup()
+
+
+def build_solo_difficulty_keyboard() -> InlineKeyboardMarkup:
+    """Build difficulty selector for Solo Mode."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🟢 Легкая (EASY)",
+        callback_data=MenuCallback(action="solo_diff", code="EASY"),
+    )
+    builder.button(
+        text="🟡 Средняя (MEDIUM)",
+        callback_data=MenuCallback(action="solo_diff", code="MEDIUM"),
+    )
+    builder.button(
+        text="🔴 Сложная (HARD)",
+        callback_data=MenuCallback(action="solo_diff", code="HARD"),
+    )
+    builder.button(
+        text="🎲 Случайная депеша",
+        callback_data=MenuCallback(action="solo_diff", code="RANDOM"),
+    )
+    builder.button(
+        text="◀️ Главное меню",
+        callback_data=MenuCallback(action="main"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
 
 
 def build_catalog_keyboard(
@@ -238,12 +270,31 @@ def build_agent_symbol_keyboard(
         )
     builder.adjust(5)
 
-    builder.row(
-        InlineKeyboardButton(
-            text="📡 Запросить помощь Штаба",
-            callback_data=HintActionCallback(code=code, action="sos", symbol=0).pack(),
+    is_solo = getattr(session_or_code, "is_solo", False)
+    if is_solo:
+        builder.row(
+            InlineKeyboardButton(
+                text="💡 Подсказка Штаба (открыть букву)",
+                callback_data=HintActionCallback(code=code, action="solo_hint", symbol=0).pack(),
+            ),
         )
-    )
+        builder.row(
+            InlineKeyboardButton(
+                text="📊 Частотный анализ",
+                callback_data=HintActionCallback(code=code, action="solo_freq", symbol=0).pack(),
+            ),
+            InlineKeyboardButton(
+                text="🏳️ Сдаться",
+                callback_data=HintActionCallback(code=code, action="solo_surrender", symbol=0).pack(),
+            ),
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(
+                text="📡 Запросить помощь Штаба",
+                callback_data=HintActionCallback(code=code, action="sos", symbol=0).pack(),
+            )
+        )
     builder.row(
         InlineKeyboardButton(
             text="🔄 Обновить табло",

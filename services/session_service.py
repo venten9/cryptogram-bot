@@ -398,6 +398,100 @@ class SessionService:
             self._register_session_cache(game)
             return game
 
+    async def create_solo_session(
+        self,
+        player_tg_id: int,
+        difficulty: str = "MEDIUM",
+        catalog_id: Optional[str] = None,
+        custom_text: Optional[str] = None,
+        seed: Optional[int] = None,
+        username: Optional[str] = None,
+        first_name: str = "",
+        db_session: Optional[AsyncSession] = None,
+    ) -> GameSession:
+        """Create a solo game room where player acts as Agent against automated Headquarters.
+
+        Session immediately begins in IN_PROGRESS status.
+        Automated HQ bot is assigned as analyst, and player is assigned as agent.
+        """
+        import random
+        from cryptogram.catalog import get_catalog, get_catalog_item
+
+        text: str
+        cat_id: Optional[str] = None
+        is_custom = False
+
+        if custom_text:
+            text = custom_text
+            is_custom = True
+        elif catalog_id:
+            cat_item = get_catalog_item(catalog_id)
+            if not cat_item:
+                raise ValueError(f"Депеша с идентификатором '{catalog_id}' не найдена в каталоге.")
+            text = cat_item.text
+            cat_id = cat_item.id
+        else:
+            catalog = get_catalog()
+            diff_upper = difficulty.strip().upper() if difficulty else "MEDIUM"
+            if diff_upper in ("EASY", "MEDIUM", "HARD"):
+                candidates = [c for c in catalog if c.difficulty == diff_upper]
+            else:
+                candidates = catalog
+            if not candidates:
+                candidates = catalog
+            cat_item = random.choice(candidates)
+            text = cat_item.text
+            cat_id = cat_item.id
+
+        validation = validate_text(text)
+        if not validation.is_valid:
+            raise ValueError(validation.error_message or "Текст не подходит для создания шифрограммы.")
+
+        cipher_data = generate_cipher(text, seed=seed)
+
+        async with self._get_db(db_session) as db:
+            # Player is the field agent
+            player = await self.get_or_create_user(
+                telegram_id=player_tg_id,
+                username=username,
+                first_name=first_name,
+                db_session=db,
+            )
+
+            # Automated Headquarters bot user (ID = 0)
+            hq_bot = await self.get_or_create_user(
+                telegram_id=0,
+                username="hq_analyst",
+                first_name="Штаб-квартира (ИИ)",
+                db_session=db,
+            )
+
+            invite_code = await self._generate_unique_invite_code(db)
+
+            game = GameSession(
+                invite_code=invite_code,
+                analyst_id=hq_bot.id,
+                agent_id=player.id,
+                status=SessionStatus.IN_PROGRESS,
+                original_text=cipher_data.original_text,
+                normalized_text=cipher_data.normalized_text,
+                cipher_mapping=cipher_data.char_to_code,
+                guessed_mapping={},
+                is_custom_quote=is_custom,
+                catalog_id=cat_id,
+                is_solo=True,
+                total_unique_letters=len(cipher_data.char_to_code),
+            )
+            # Record participation for player
+            player.games_played += 1
+            player.games_as_agent += 1
+
+            db.add(game)
+            await db.commit()
+            await db.refresh(game)
+            self._register_session_cache(game)
+            return game
+
     async def join_session(
         self,
         invite_code: str,
@@ -656,7 +750,7 @@ class SessionService:
                         f"INVALID_SESSION_STATE: Нельзя отправить подсказку: игра не в процессе (статус: {game.status.value})."
                     )
 
-                if game.analyst_id != user_tg_id:
+                if game.analyst_id != user_tg_id and not (game.is_solo and user_tg_id == game.agent_id):
                     raise UnauthorizedActionError(
                         "UNAUTHORIZED_ACTION: Только Штабной Аналитик может отправлять подсказки."
                     )
@@ -768,16 +862,26 @@ class SessionService:
                 if game is None:
                     raise SessionNotFoundError(f"SESSION_NOT_FOUND: Игра '{session_identifier}' не найдена.")
 
-                if game.analyst_id != user_tg_id:
-                    raise UnauthorizedActionError(
-                        "UNAUTHORIZED_ACTION: Только создатель сессии (Штабной Аналитик) может отменить операцию."
-                    )
+                if game.is_solo:
+                    if game.agent_id != user_tg_id:
+                        raise UnauthorizedActionError(
+                            "UNAUTHORIZED_ACTION: Только участник операции может отменить её."
+                        )
+                    if game.status != SessionStatus.IN_PROGRESS:
+                        raise SessionInvalidStateError(
+                            f"INVALID_SESSION_STATE: Невозможно отменить операцию в статусе {game.status.value}."
+                        )
+                else:
+                    if game.analyst_id != user_tg_id:
+                        raise UnauthorizedActionError(
+                            "UNAUTHORIZED_ACTION: Только создатель сессии (Штабной Аналитик) может отменить операцию."
+                        )
 
-                if game.status != SessionStatus.WAITING_AGENT:
-                    raise SessionInvalidStateError(
-                        f"INVALID_SESSION_STATE: Невозможно отменить операцию в статусе {game.status.value}. "
-                        "Отмена доступна только в режиме ожидания Агента."
-                    )
+                    if game.status != SessionStatus.WAITING_AGENT:
+                        raise SessionInvalidStateError(
+                            f"INVALID_SESSION_STATE: Невозможно отменить операцию в статусе {game.status.value}. "
+                            "Отмена доступна только в режиме ожидания Агента."
+                        )
 
                 game.status = SessionStatus.CANCELLED
                 await db.commit()

@@ -131,6 +131,16 @@ def _migrate_sqlite_schema(sync_conn) -> None:
             sync_conn.exec_driver_sql(f"ALTER TABLE users ADD COLUMN {col_name} {col_def};")
             logger.info("Migrated users table: added column %s", col_name)
 
+    # Migrate game_sessions table
+    result_sessions = sync_conn.exec_driver_sql("PRAGMA table_info(game_sessions);")
+    rows_sessions = result_sessions.fetchall()
+    if rows_sessions:
+        existing_session_cols = {row[1] for row in rows_sessions}
+        if "is_solo" not in existing_session_cols:
+            sync_conn.exec_driver_sql("ALTER TABLE game_sessions ADD COLUMN is_solo BOOLEAN NOT NULL DEFAULT 0;")
+            logger.info("Migrated game_sessions table: added column is_solo")
+
+
 
 async def init_db(engine: AsyncEngine) -> None:
     """Idempotently initialize all database tables from SQLAlchemy metadata."""

@@ -13,6 +13,7 @@ from bot.keyboards import (
     build_agent_symbol_keyboard,
     build_main_menu_keyboard,
     build_profile_keyboard,
+    build_solo_difficulty_keyboard,
 )
 from bot.utils import NotifierService, safe_edit_callback
 from database.models import User
@@ -212,6 +213,62 @@ async def handle_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer(
             welcome_text, reply_markup=build_main_menu_keyboard(), parse_mode="HTML"
         )
+
+
+@common_router.callback_query(MenuCallback.filter(F.action == "solo"))
+@common_router.callback_query(F.data == "menu:solo")
+async def handle_solo_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    """Prompt player to choose difficulty for Solo Game mode."""
+    await state.clear()
+    await callback.answer()
+    text = (
+        "🎯 <b>ОДИНОЧНЫЙ РЕЖИМ (СОЛО)</b>\n\n"
+        "Штаб подготовит для вас зашифрованную депешу. "
+        "Ваша задача — расшифровать её в роли Полевого Агента.\n\n"
+        "Выберите сложность операции:"
+    )
+    kb = build_solo_difficulty_keyboard()
+    await safe_edit_callback(callback, text=text, reply_markup=kb, parse_mode="HTML")
+
+
+@common_router.callback_query(MenuCallback.filter(F.action == "solo_diff"))
+async def handle_solo_start(
+    callback: CallbackQuery,
+    callback_data: MenuCallback,
+    session_service: SessionService,
+    bot: Bot,
+    notifier: Optional[NotifierService] = None,
+) -> None:
+    """Start solo game session and open Field Agent Terminal."""
+    user = callback.from_user
+    if not user:
+        return
+
+    await callback.answer()
+    difficulty = callback_data.code or "MEDIUM"
+
+    if notifier is None:
+        notifier = NotifierService(bot=bot, session_service=session_service)
+
+    game = await session_service.create_solo_session(
+        player_tg_id=user.id,
+        difficulty=difficulty,
+        username=user.username,
+        first_name=user.first_name or "",
+        last_name=user.last_name,
+    )
+
+    terminal_text = notifier.render_agent_terminal(game)
+    kb = build_agent_symbol_keyboard(game)
+
+    if callback.message:
+        await safe_edit_callback(callback, text=terminal_text, reply_markup=kb, parse_mode="HTML")
+        await session_service.update_message_ids(
+            session_id_or_code=game.id,
+            agent_chat_id=callback.message.chat.id,
+            agent_message_id=callback.message.message_id,
+        )
+
 
 
 def render_player_profile(user: User) -> str:
